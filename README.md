@@ -38,6 +38,8 @@ app/
   config.py            Environment-variable based configuration
 data/
   sample_reviews.csv   Small labeled sample for the evaluation script
+docs/
+  adr/                 Architecture Decision Records (why things were built this way)
 scripts/
   evaluate.py          Calls the running API against a labeled CSV and reports accuracy
 tests/
@@ -45,6 +47,36 @@ tests/
 Dockerfile
 requirements.txt
 .env.example
+```
+
+## Architecture decisions
+
+Key design decisions (which AI service and model to use, why sentiment
+analysis over summarization/NER, why a sample dataset instead of the full
+CSV, caching and rate-limiting design, etc.) are documented as ADRs in
+[`docs/adr/`](docs/adr/README.md).
+
+## Request flow
+
+```mermaid
+flowchart TD
+    A[Client] -->|POST /sentiment| B{Rate limit<br/>exceeded?}
+    B -- yes --> C[429 Too Many Requests]
+    B -- no --> D{Empty/blank<br/>text?}
+    D -- yes --> E[400 Bad Request]
+    D -- no --> F{Cached?}
+    F -- yes --> G[Return cached result<br/>cached: true]
+    F -- no --> H[Call Hugging Face<br/>Inference API]
+    H --> I{Response}
+    I -- 200 --> J[Store in cache]
+    J --> K[Return result<br/>cached: false]
+    I -- 503 model loading --> L{Retries left?}
+    L -- yes --> M[Wait and retry]
+    M --> H
+    L -- no --> N[503 Service Unavailable]
+    I -- 429 --> O[429 propagated from Hugging Face]
+    I -- 401 --> P[401 Invalid token]
+    I -- timeout/network error --> Q[504 / 502]
 ```
 
 ## Setup
@@ -183,3 +215,7 @@ All configuration is read from environment variables (see [`.env.example`](.env.
 | `CACHE_TTL_SECONDS`        | `3600`                                                 | Cache entry lifetime                  |
 | `CACHE_MAX_SIZE`           | `1000`                                                  | Max cached entries                    |
 | `RATE_LIMIT`               | `10/minute`                                             | Requests allowed per client IP        |
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

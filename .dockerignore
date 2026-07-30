@@ -7,4 +7,5 @@ venv/
 tests/
 data/
 scripts/
+docs/
 .git/
