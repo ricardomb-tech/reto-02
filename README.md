@@ -1,9 +1,9 @@
-# Reto 02 — Sentiment Analysis API (Python + AI)
+# Reto 02: Sentiment Analysis API (Python + AI)
 
 A FastAPI service that connects to a real AI model (Hugging Face Inference API) to classify the
 sentiment of a piece of text as **POSITIVE** or **NEGATIVE**, with response caching and rate limiting.
 
-Built for EPAM's "Python Run — Debug the Future" challenge 2 ("Dato que Piensa").
+Built for EPAM's "Python Run - Debug the Future" challenge 2 ("Dato que Piensa").
 
 ## Data source
 
@@ -20,8 +20,8 @@ Built for EPAM's "Python Run — Debug the Future" challenge 2 ("Dato que Piensa
 ## AI model / service
 
 - **Service**: [Hugging Face Inference API](https://huggingface.co/docs/api-inference/index)
-- **Model**: [`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english)
-  — a DistilBERT model fine-tuned on SST-2, returning `POSITIVE`/`NEGATIVE` labels with a confidence score.
+- **Model**: [`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english),
+  a DistilBERT model fine-tuned on SST-2, returning `POSITIVE`/`NEGATIVE` labels with a confidence score.
 - Requests go through the current Hugging Face routing endpoint,
   `https://router.huggingface.co/hf-inference/models/{model}` (the older
   `api-inference.huggingface.co` host has been retired).
@@ -107,7 +107,7 @@ flowchart TD
    # edit .env and set HF_API_TOKEN=hf_xxxxxxxxxxxxxxxx
    ```
 
-   The API key is **never** hardcoded — it is read from the environment via `python-dotenv`.
+   The API key is **never** hardcoded; it is read from the environment via `python-dotenv`.
 
 ## Running the API
 
@@ -123,13 +123,13 @@ The API will be available at `http://localhost:8000`. Interactive docs (Swagger 
 
 ### Endpoints
 
-**`GET /health`** — liveness check.
+**`GET /health`**: liveness check.
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-**`POST /sentiment`** — classify the sentiment of a text.
+**`POST /sentiment`**: classify the sentiment of a text.
 
 ```bash
 curl -X POST http://localhost:8000/sentiment \
@@ -183,7 +183,7 @@ Unit tests mock the Hugging Face call, so no API key or network access is requir
 pytest
 ```
 
-## Bonus A — Docker
+## Bonus A: Docker
 
 Build and run the API in a container:
 
@@ -192,7 +192,7 @@ docker build -t sentiment-api .
 docker run --rm -p 8000:8000 -e HF_API_TOKEN=hf_xxxxxxxxxxxxxxxx sentiment-api
 ```
 
-## Bonus B — Caching and rate limiting
+## Bonus B: Caching and rate limiting
 
 - **Caching**: identical requests (same normalized text) are served from an in-memory TTL cache
   (`app/cache.py`, via `cachetools`) instead of calling Hugging Face again. Default TTL is 1 hour

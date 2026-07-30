@@ -6,46 +6,46 @@
 
 ## Context
 
-The challenge requires exposing the solution either as a Flask/FastAPI
-endpoint or as a CLI script. Both approaches would satisfy the base
-requirement.
+The challenge asks for either a Flask/FastAPI endpoint or a CLI script.
+Either would satisfy the base requirement.
 
 ## Decision
 
-The solution is exposed as a **FastAPI** application
+I exposed the solution as a **FastAPI** application
 ([`app/main.py`](../../app/main.py)) with `GET /health` and `POST /sentiment`
-endpoints, rather than as a CLI script or a Flask app.
+endpoints, instead of a CLI script or a Flask app.
 
 ## Rationale
 
-- FastAPI provides request validation (via Pydantic models) and automatic
-  interactive documentation (Swagger UI at `/docs`) with very little
-  boilerplate, which helps a judge exercise the API without extra tooling.
-- Native support for dependency injection and middleware made it
-  straightforward to wire in `slowapi` for per-IP rate limiting
+- FastAPI gives me request validation through Pydantic and automatic
+  interactive docs (Swagger UI at `/docs`) with almost no boilerplate. That
+  means a judge can poke at the API without installing anything extra.
+- Its dependency injection and middleware support made it easy to wire in
+  `slowapi` for per-IP rate limiting
   ([ADR-0007](0007-per-ip-rate-limiting.md)).
-- An HTTP endpoint is easier to demo end-to-end (e.g. with `curl`, `scripts/evaluate.py`,
-  or a container health check) than a CLI script, and maps naturally onto the
-  Docker bonus ([ADR-0006](0006-in-memory-ttl-cache.md) and the Dockerfile).
+- An HTTP endpoint is simpler to demo end to end, with `curl`,
+  `scripts/evaluate.py`, or a container health check, than a CLI script
+  would be, and it fits naturally with the Docker bonus
+  ([ADR-0006](0006-in-memory-ttl-cache.md) and the Dockerfile).
 
 ## Consequences
 
 ### Pros
 
-- Self-documenting API (`/docs`, `/openapi.json`) with typed request/response
-  validation out of the box.
-- Straightforward to containerize (Bonus A) and to protect with rate limiting
-  and caching (Bonus B).
+- Self-documenting API (`/docs`, `/openapi.json`) with typed request and
+  response validation built in.
+- Easy to containerize (Bonus A) and to protect with rate limiting and
+  caching (Bonus B).
 
 ### Cons
 
-- Requires running a persistent server process, versus a CLI script that
-  could be invoked once and exit — slightly more moving parts for a judge to
-  start up (though a single `uvicorn` command is enough).
+- It needs a persistent server process running, unlike a CLI script you
+  could invoke once and walk away from. One more moving part for a judge to
+  start up, though a single `uvicorn` command covers it.
 
 ## Alternatives considered
 
 | Alternative | Reason not adopted |
 |-------------|---------------------|
-| **Flask** | Would require adding a separate validation library (e.g. `marshmallow` or manual checks) and a separate rate-limiting extension; FastAPI provides both more directly via Pydantic and `slowapi`. |
-| **CLI script** | Simpler to write, but harder to demonstrate the caching and rate-limiting bonus in a way that's visible to a judge (an HTTP response header/field is more explicit than console output). |
+| **Flask** | Would need a separate validation library (`marshmallow`, or hand-rolled checks) and a separate rate-limiting extension. FastAPI gives me both through Pydantic and `slowapi` already. |
+| **CLI script** | Quicker to write, but harder to show off the caching and rate-limiting bonus in a way a judge can actually see. An HTTP response field is more visible than console output. |

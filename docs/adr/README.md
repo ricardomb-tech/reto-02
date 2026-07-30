@@ -1,22 +1,20 @@
 # Architecture Decision Records (ADR)
 
-This directory collects the main architecture decisions made while building
-this project. Each ADR documents the context a decision arose from, the
-alternative that was chosen, and the consequences it had on the design of the
-solution.
+This folder holds the decisions I made while building this project, and why
+I made them. Each ADR covers the problem I was facing, what I chose to do
+about it, and what that choice cost me or bought me.
 
-The goal is to leave a record of the reasoning behind decisions that would be
-costly to change or that directly influence how the application behaves.
+I write these down for decisions that are expensive to reverse or that shape
+how the app behaves day to day. Smaller stuff just lives in the code.
 
 ## ADR structure
 
-All documents follow the same structure:
+Every document follows the same shape:
 
-- **Status:** whether the decision is proposed, accepted, or superseded.
-- **Context:** the problem or need that motivated the decision.
-- **Decision:** the chosen solution and the reasons for adopting it.
-- **Consequences:** a summary of the benefits, limitations, and trade-offs
-  taken on.
+- **Status:** proposed, accepted, or superseded.
+- **Context:** what problem pushed me toward a decision.
+- **Decision:** what I picked, and why.
+- **Consequences:** the trade-offs I'm living with as a result.
 
 ## Index
 
@@ -30,22 +28,23 @@ All documents follow the same structure:
 | [0006](0006-in-memory-ttl-cache.md) | In-memory TTL cache for repeated requests (Bonus B) | ✅ Accepted |
 | [0007](0007-per-ip-rate-limiting.md) | Per-IP rate limiting with slowapi, plus upstream backoff | ✅ Accepted |
 
-## Why do these documents exist?
+## Why bother with this?
 
-The README explains **what** the project does and how to run it. ADRs answer
-a different question: **why was it built this way?**
+The main README tells you what the project does and how to run it. These
+documents answer a different question: why does it work this way instead of
+some other way?
 
-This is where decisions such as the following are documented:
+That covers things like:
 
-- why sentiment analysis was chosen over summarization or entity extraction;
-- why the Hugging Face Inference API was chosen over OpenAI or a local model;
-- why this specific DistilBERT/SST-2 model was chosen;
-- why the solution is exposed as a FastAPI endpoint rather than a CLI script;
-- why the repository ships a small original sample instead of the full
-  Kaggle CSV;
-- why caching is in-memory instead of an external store like Redis;
-- why rate limiting is applied per client IP, with upstream backoff on top.
+- why sentiment analysis, and not summarization or entity extraction
+- why Hugging Face's Inference API instead of OpenAI or a model running locally
+- why this specific DistilBERT/SST-2 checkpoint
+- why FastAPI instead of a CLI script
+- why a small hand-written sample instead of the full Kaggle CSV
+- why the cache lives in memory instead of something like Redis
+- why rate limiting is per client IP, with retries on top of that
 
-Keeping this history makes it easier to understand the project's evolution
-and helps anyone follow the technical reasoning behind the solution without
-having to reverse-engineer it from the source code.
+None of it is required reading to run the app. It's here so that later,
+whoever picks this up (probably me, in a few months, having forgotten
+everything) doesn't have to reverse-engineer the reasoning from the source
+code.
