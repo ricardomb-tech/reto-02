@@ -39,3 +39,31 @@ def test_sentiment_upstream_error_propagated():
     with patch("app.main.analyze_sentiment", side_effect=SentimentServiceError("boom", status_code=502)):
         response = client.post("/sentiment", json={"text": "some text"})
     assert response.status_code == 502
+
+
+def test_sentiment_batch_success():
+    fake_results = [{"label": "POSITIVE", "score": 0.98}, {"label": "NEGATIVE", "score": 0.87}]
+    with patch("app.main.analyze_sentiment_batch", return_value=fake_results):
+        response = client.post("/sentiment/batch", json={"texts": ["great movie", "terrible movie"]})
+    assert response.status_code == 200
+    body = response.json()["results"]
+    assert [item["label"] for item in body] == ["POSITIVE", "NEGATIVE"]
+    assert all(item["cached"] is False for item in body)
+
+
+def test_sentiment_batch_empty_texts_rejected():
+    response = client.post("/sentiment/batch", json={"texts": ["ok", "   "]})
+    assert response.status_code == 400
+
+
+def test_sentiment_batch_missing_texts_field():
+    response = client.post("/sentiment/batch", json={})
+    assert response.status_code == 422
+
+
+def test_sentiment_batch_upstream_error_propagated():
+    from app.sentiment_client import SentimentServiceError
+
+    with patch("app.main.analyze_sentiment_batch", side_effect=SentimentServiceError("boom", status_code=502)):
+        response = client.post("/sentiment/batch", json={"texts": ["some text"]})
+    assert response.status_code == 502
