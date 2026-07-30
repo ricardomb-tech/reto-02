@@ -27,6 +27,12 @@ Every document follows the same shape:
 | [0005](0005-sample-dataset-instead-of-full-csv.md) | Ship a small original sample instead of the full IMDB CSV | ✅ Accepted |
 | [0006](0006-in-memory-ttl-cache.md) | In-memory TTL cache for repeated requests (Bonus B) | ✅ Accepted |
 | [0007](0007-per-ip-rate-limiting.md) | Per-IP rate limiting with slowapi, plus upstream backoff | ✅ Accepted |
+| [0008](0008-async-http-client-and-batch-endpoint.md) | Async HTTP client and a batch endpoint for latency and throughput | ✅ Accepted |
+| [0009](0009-neutral-confidence-threshold.md) | Confidence threshold for a NEUTRAL label | ✅ Accepted |
+| [0010](0010-circuit-breaker-for-upstream-resilience.md) | In-process circuit breaker for upstream resilience | ✅ Accepted |
+| [0011](0011-observability-metrics-and-structured-logging.md) | Observability: Prometheus metrics and structured logging | ✅ Accepted |
+| [0012](0012-pluggable-cache-backend.md) | Pluggable cache backend (in-memory default, optional Redis) | ✅ Accepted |
+| [0013](0013-security-audit-hardening.md) | Security hardening from an internal audit | ✅ Accepted |
 
 ## Why bother with this?
 

@@ -48,6 +48,7 @@ def evaluate(csv_path: str, url: str) -> None:
     correct = 0
     errors = 0
     first_request = True
+    started_at = time.monotonic()
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -74,8 +75,32 @@ def evaluate(csv_path: str, url: str) -> None:
             else:
                 print(f"[mismatch] expected={expected_label} got={predicted_label} text={text!r}")
 
+    elapsed = time.monotonic() - started_at
     accuracy = (correct / total * 100) if total else 0.0
-    print(f"\nEvaluated {total} samples ({errors} request errors).")
+    print(f"\nEvaluated {total} samples ({errors} request errors) in {elapsed:.2f}s (per-row mode).")
+    print(f"Accuracy: {correct}/{total} = {accuracy:.1f}%")
+
+
+def evaluate_batch(csv_path: str, url: str) -> None:
+    """Same evaluation, but sends the whole CSV to /sentiment/batch in one call."""
+    rows = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    batch_url = url.rsplit("/sentiment", 1)[0] + "/sentiment/batch"
+    started_at = time.monotonic()
+    response = requests.post(batch_url, json={"texts": [row["text"] for row in rows]}, timeout=60)
+    response.raise_for_status()
+    elapsed = time.monotonic() - started_at
+
+    results = response.json()["results"]
+    correct = sum(
+        1 for row, result in zip(rows, results) if result["label"].upper() == row["label"].strip().upper()
+    )
+    total = len(rows)
+    accuracy = (correct / total * 100) if total else 0.0
+    print(f"\nEvaluated {total} samples in a single batch call, {elapsed:.2f}s (batch mode).")
     print(f"Accuracy: {correct}/{total} = {accuracy:.1f}%")
 
 
@@ -83,6 +108,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate the sentiment API against a labeled CSV.")
     parser.add_argument("--csv", default="data/sample_reviews.csv", help="Path to labeled CSV file.")
     parser.add_argument("--url", default="http://localhost:8000/sentiment", help="Sentiment endpoint URL.")
+    parser.add_argument(
+        "--batch", action="store_true", help="Send the whole CSV to /sentiment/batch in one call instead of row by row."
+    )
     args = parser.parse_args()
 
-    evaluate(args.csv, args.url)
+    if args.batch:
+        evaluate_batch(args.csv, args.url)
+    else:
+        evaluate(args.csv, args.url)
