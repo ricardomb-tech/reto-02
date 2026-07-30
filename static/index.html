@@ -36,11 +36,19 @@
   }
   #result.visible { display: block; }
   .label { font-weight: bold; font-size: 1.1rem; }
+  .emoji { font-size: 1.4rem; margin-right: 0.4rem; vertical-align: middle; }
   .POSITIVE { color: #1a7f37; }
   .NEGATIVE { color: #c62828; }
   .NEUTRAL { color: #9a7b00; }
   .meta { color: #888; font-size: 0.85rem; margin-top: 0.4rem; }
   .error { color: #c62828; }
+  .confidence { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.6rem; }
+  .confidence-bar { flex: 1; height: 0.5rem; border-radius: 0.25rem; background: #8882; overflow: hidden; }
+  .confidence-fill { height: 100%; border-radius: 0.25rem; }
+  .confidence-fill.POSITIVE { background: #1a7f37; }
+  .confidence-fill.NEGATIVE { background: #c62828; }
+  .confidence-fill.NEUTRAL { background: #9a7b00; }
+  .confidence-label { font-size: 0.85rem; color: #888; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -52,71 +60,6 @@
   </div>
   <div id="result"></div>
 
-  <script>
-    const textEl = document.getElementById("text");
-    const buttonEl = document.getElementById("analyze");
-    const resultEl = document.getElementById("result");
-
-    async function analyze() {
-      const text = textEl.value.trim();
-      if (!text) return;
-
-      buttonEl.disabled = true;
-      buttonEl.textContent = "Analyzing…";
-      resultEl.className = "visible";
-      resultEl.textContent = "";
-
-      try {
-        const response = await fetch("/sentiment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
-        const body = await response.json();
-
-        if (!response.ok) {
-          showError(`Error ${response.status}: ${body.detail || "request failed"}`);
-          return;
-        }
-
-        showResult(body);
-      } catch (err) {
-        showError(`Request failed: ${err}`);
-      } finally {
-        buttonEl.disabled = false;
-        buttonEl.textContent = "Analyze";
-      }
-    }
-
-    function clearResult() {
-      while (resultEl.firstChild) resultEl.removeChild(resultEl.firstChild);
-    }
-
-    function showError(message) {
-      clearResult();
-      const span = document.createElement("span");
-      span.className = "error";
-      span.textContent = message;
-      resultEl.appendChild(span);
-    }
-
-    function showResult(body) {
-      clearResult();
-      const labelDiv = document.createElement("div");
-      labelDiv.className = `label ${body.label}`;
-      labelDiv.textContent = body.label;
-
-      const metaDiv = document.createElement("div");
-      metaDiv.className = "meta";
-      metaDiv.textContent = `score: ${body.score.toFixed(4)} · cached: ${body.cached}`;
-
-      resultEl.append(labelDiv, metaDiv);
-    }
-
-    buttonEl.addEventListener("click", analyze);
-    textEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze();
-    });
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@ load_dotenv()
 
 class Settings:
     hf_api_token: str = os.getenv("HF_API_TOKEN", "")
-    hf_model: str = os.getenv("HF_MODEL", "distilbert/distilbert-base-uncased-finetuned-sst-2-english")
+    hf_model: str = os.getenv("HF_MODEL", "cardiffnlp/twitter-roberta-base-sentiment-latest")
     hf_api_url: str = f"https://router.huggingface.co/hf-inference/models/{hf_model}"
 
     request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "15"))
@@ -23,7 +23,7 @@ class Settings:
     batch_rate_limit: str = os.getenv("BATCH_RATE_LIMIT", "5/minute")
     batch_max_size: int = int(os.getenv("BATCH_MAX_SIZE", "50"))
 
-    neutral_confidence_threshold: float = float(os.getenv("NEUTRAL_CONFIDENCE_THRESHOLD", "0.6"))
+    neutral_confidence_threshold: float = float(os.getenv("NEUTRAL_CONFIDENCE_THRESHOLD", "0.7"))
 
     circuit_breaker_threshold: int = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))
     circuit_breaker_reset_seconds: float = float(os.getenv("CIRCUIT_BREAKER_RESET_SECONDS", "30"))

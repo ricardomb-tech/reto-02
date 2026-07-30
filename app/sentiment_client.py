@@ -47,27 +47,34 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {settings.hf_api_token}"}
 
 
-def _best_from_scores(scores: list) -> dict:
-    """Pick the highest-confidence label out of Hugging Face's per-label score list.
+def _best_from_scores(scores) -> dict:
+    """Pick the highest-confidence label out of Hugging Face's per-label output.
 
-    Binary softmax confidence is always >= 0.5, so a low score means the model wasn't
-    really sure either way. Below `neutral_confidence_threshold`, report NEUTRAL instead
-    of forcing the call into POSITIVE/NEGATIVE (see ADR-0009).
+    `scores` is normally a list of per-class {"label", "score"} dicts, but the Inference
+    API returns a single {"label", "score"} dict (just the winner, no runner-up classes)
+    for some request shapes (see the batch-parsing note in ADR-0014) — handle both.
+
+    The model (see ADR-0014) already outputs a native NEUTRAL class, so this just picks
+    the top-scoring label and normalizes its casing. On top of that, a 3-way softmax can
+    still land close to uniform (~0.33 each) on genuinely ambiguous text; when the winning
+    score falls below `neutral_confidence_threshold` we don't trust that call enough to
+    report POSITIVE/NEGATIVE, so it's downgraded to NEUTRAL too (see ADR-0015).
     """
     try:
-        best = max(scores, key=lambda item: item["score"])
-        label = best["label"]
+        candidates = scores if isinstance(scores, list) else [scores]
+        best = max(candidates, key=lambda item: item["score"])
+        label = str(best["label"]).strip().upper()
         score = round(float(best["score"]), 4)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise SentimentServiceError(f"Unexpected response shape from model: {scores}") from exc
 
-    if score < settings.neutral_confidence_threshold:
+    if label != "NEUTRAL" and score < settings.neutral_confidence_threshold:
         label = "NEUTRAL"
     return {"label": label, "score": score}
 
 
 def _parse_single_result(payload) -> dict:
-    # Expected shape: [[{"label": "POSITIVE", "score": 0.99}, {"label": "NEGATIVE", "score": 0.01}]]
+    # Expected shape: [[{"label": "positive", "score": 0.99}, ...one entry per class]]
     try:
         scores = payload[0]
     except (KeyError, IndexError, TypeError) as exc:
@@ -75,11 +82,27 @@ def _parse_single_result(payload) -> dict:
     return _best_from_scores(scores)
 
 
-def _parse_batch_result(payload) -> list:
-    # Expected shape: one scores-list per input text.
-    if not isinstance(payload, list):
+def _parse_batch_result(payload, expected_count: int) -> list:
+    """Unwrap a batch response into one result per input text.
+
+    The Inference API has returned two different shapes for list-input requests across
+    models observed in this project: one entry per text at the top level (`len(payload)
+    == expected_count`), and everything wrapped in one extra outer list (`payload == [[...
+    expected_count entries ...]]`). Pick whichever shape actually matches the number of
+    texts sent, instead of assuming one fixed layout (see ADR-0014).
+    """
+    if isinstance(payload, list) and len(payload) == expected_count:
+        per_text = payload
+    elif (
+        isinstance(payload, list)
+        and len(payload) == 1
+        and isinstance(payload[0], list)
+        and len(payload[0]) == expected_count
+    ):
+        per_text = payload[0]
+    else:
         raise SentimentServiceError(f"Unexpected response shape from model: {payload}")
-    return [_best_from_scores(scores) for scores in payload]
+    return [_best_from_scores(scores) for scores in per_text]
 
 
 async def _call_hf(inputs):
@@ -154,7 +177,7 @@ async def analyze_sentiment(text: str) -> dict:
 async def analyze_sentiment_batch(texts: list) -> list:
     """Call the Hugging Face Inference API once for a list of texts, in order."""
     payload = await _call_hf(texts)
-    return _parse_batch_result(payload)
+    return _parse_batch_result(payload, expected_count=len(texts))
 
 
 async def prewarm_model() -> None:

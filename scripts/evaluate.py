@@ -1,9 +1,11 @@
-"""Evaluate the running sentiment API against a labeled CSV dataset and report accuracy.
+"""Evaluate the running sentiment API against a labeled CSV dataset and report metrics.
 
 Usage:
     python scripts/evaluate.py --csv data/sample_reviews.csv --url http://localhost:8000/sentiment
 
-The CSV must have two columns: "text" and "label" (POSITIVE/NEGATIVE).
+The CSV must have two columns: "text" and "label" (POSITIVE/NEGATIVE/NEUTRAL). Reports a
+confusion matrix plus per-class precision/recall/F1 and overall accuracy/macro-F1, not just a
+single accuracy number (see scripts/metrics_report.py).
 
 Requests are paced to stay under the API's own rate limit (see RATE_LIMIT in app/config.py),
 and any unexpected 429 is retried with backoff rather than counted as a hard failure.
@@ -18,7 +20,11 @@ import time
 import requests
 from dotenv import load_dotenv
 
+from metrics_report import classification_report
+
 load_dotenv()
+
+LABELS = ["POSITIVE", "NEGATIVE", "NEUTRAL"]
 
 
 def _seconds_between_requests(rate_limit: str) -> float:
@@ -44,11 +50,11 @@ def _post_with_retry(url: str, text: str, max_retries: int = 3):
 
 def evaluate(csv_path: str, url: str) -> None:
     delay = _seconds_between_requests(os.getenv("RATE_LIMIT", "10/minute"))
-    total = 0
-    correct = 0
     errors = 0
     first_request = True
     started_at = time.monotonic()
+    expected_labels = []
+    predicted_labels = []
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -69,16 +75,14 @@ def evaluate(csv_path: str, url: str) -> None:
                 continue
 
             predicted_label = response.json().get("label", "").upper()
-            total += 1
-            if predicted_label == expected_label:
-                correct += 1
-            else:
+            expected_labels.append(expected_label)
+            predicted_labels.append(predicted_label)
+            if predicted_label != expected_label:
                 print(f"[mismatch] expected={expected_label} got={predicted_label} text={text!r}")
 
     elapsed = time.monotonic() - started_at
-    accuracy = (correct / total * 100) if total else 0.0
-    print(f"\nEvaluated {total} samples ({errors} request errors) in {elapsed:.2f}s (per-row mode).")
-    print(f"Accuracy: {correct}/{total} = {accuracy:.1f}%")
+    print(f"\nEvaluated {len(expected_labels)} samples ({errors} request errors) in {elapsed:.2f}s (per-row mode).")
+    print(classification_report(expected_labels, predicted_labels, LABELS).render())
 
 
 def evaluate_batch(csv_path: str, url: str) -> None:
@@ -95,13 +99,11 @@ def evaluate_batch(csv_path: str, url: str) -> None:
     elapsed = time.monotonic() - started_at
 
     results = response.json()["results"]
-    correct = sum(
-        1 for row, result in zip(rows, results) if result["label"].upper() == row["label"].strip().upper()
-    )
-    total = len(rows)
-    accuracy = (correct / total * 100) if total else 0.0
-    print(f"\nEvaluated {total} samples in a single batch call, {elapsed:.2f}s (batch mode).")
-    print(f"Accuracy: {correct}/{total} = {accuracy:.1f}%")
+    expected_labels = [row["label"].strip().upper() for row in rows]
+    predicted_labels = [result["label"].upper() for result in results]
+
+    print(f"\nEvaluated {len(rows)} samples in a single batch call, {elapsed:.2f}s (batch mode).")
+    print(classification_report(expected_labels, predicted_labels, LABELS).render())
 
 
 if __name__ == "__main__":

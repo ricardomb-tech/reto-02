@@ -13,9 +13,12 @@ Built for EPAM's "Python Run - Debug the Future" challenge 2 ("Dato que Piensa")
 - **Dataset**: [IMDB Dataset of 50K Movie Reviews](https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews) (Kaggle, by lakshmi25npathi).
 - The full dataset is **not** committed to this repository (it is large and the review text is
   user-generated/copyrighted content). Instead, [`data/sample_reviews.csv`](data/sample_reviews.csv)
-  contains 20 short, original example reviews (written for this project) with the same
-  `text,label` schema, used by [`scripts/evaluate.py`](scripts/evaluate.py) to demonstrate accuracy
-  end-to-end against the live API.
+  contains 30 short, original example reviews (written for this project) with the same
+  `text,label` schema — 10 POSITIVE, 10 NEGATIVE, and 10 genuinely NEUTRAL (mixed-opinion or purely
+  descriptive text), used by [`scripts/evaluate.py`](scripts/evaluate.py) to measure accuracy and
+  per-class precision/recall/F1 end-to-end against the live API, and by
+  [`scripts/calibrate_threshold.py`](scripts/calibrate_threshold.py) to calibrate
+  `NEUTRAL_CONFIDENCE_THRESHOLD` (see [ADR-0015](docs/adr/0015-data-driven-neutral-threshold.md)).
 - To reproduce results on the real dataset: download the CSV from Kaggle, keep only the `review`
   and `sentiment` columns, rename them to `text` and `label` (values `POSITIVE`/`NEGATIVE`), and
   point `scripts/evaluate.py` at that file with `--csv`.
@@ -23,17 +26,22 @@ Built for EPAM's "Python Run - Debug the Future" challenge 2 ("Dato que Piensa")
 ## AI model / service
 
 - **Service**: [Hugging Face Inference API](https://huggingface.co/docs/api-inference/index)
-- **Model**: [`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english),
-  a DistilBERT model fine-tuned on SST-2, returning `POSITIVE`/`NEGATIVE` labels with a confidence score.
+- **Model**: [`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest),
+  a RoBERTa model that natively classifies text as `positive`/`neutral`/`negative` with a
+  confidence score per class (see [ADR-0014](docs/adr/0014-native-3-class-sentiment-model.md) for
+  why this replaced the earlier binary DistilBERT/SST-2 model).
 - Requests go through the current Hugging Face routing endpoint,
   `https://router.huggingface.co/hf-inference/models/{model}` (the older
   `api-inference.huggingface.co` host has been retired).
 - The model name is configurable via the `HF_MODEL` environment variable if you want to swap models
-  (use the fully namespaced id, e.g. `owner/model-name`).
-- The model itself only outputs `POSITIVE`/`NEGATIVE`, but the API downgrades low-confidence calls
-  (below `NEUTRAL_CONFIDENCE_THRESHOLD`, default `0.6`) to a third label, `NEUTRAL`, instead of
-  forcing a coin-flip result into one bucket or the other (see
-  [ADR-0009](docs/adr/0009-neutral-confidence-threshold.md)).
+  (use the fully namespaced id, e.g. `owner/model-name`; it must return
+  `positive`/`neutral`/`negative` labels with per-class scores for the NEUTRAL handling below to
+  make sense).
+- On top of the model's native NEUTRAL class, a call is downgraded to NEUTRAL if its winning score
+  falls below `NEUTRAL_CONFIDENCE_THRESHOLD` (default `0.7`, calibrated against labeled data — see
+  [ADR-0015](docs/adr/0015-data-driven-neutral-threshold.md) and
+  [`scripts/calibrate_threshold.py`](scripts/calibrate_threshold.py)) — a safety net for calls the
+  model itself wasn't confident about, whichever label won.
 
 ## Project structure
 
@@ -48,17 +56,22 @@ app/
   config.py            Environment-variable based configuration
 static/
   index.html           Minimal demo page served at /demo
+  app.js               Demo page's JS, external so it survives the page's own CSP (script-src 'self')
 data/
-  sample_reviews.csv   Small labeled sample for the evaluation script
+  sample_reviews.csv   Small labeled sample (POSITIVE/NEGATIVE/NEUTRAL) for the evaluation scripts
 docs/
   ARCHITECTURE.md      System architecture: components, diagrams, request flows
   adr/                 Architecture Decision Records (why things were built this way)
 scripts/
-  evaluate.py          Calls the running API against a labeled CSV and reports accuracy
-  loadtest.py          Fires concurrent requests and reports latency percentiles / throughput
+  evaluate.py            Calls the running API against a labeled CSV, reports a confusion matrix
+                         and per-class precision/recall/F1 (not just accuracy)
+  calibrate_threshold.py Sweeps NEUTRAL_CONFIDENCE_THRESHOLD against labeled data using real
+                         model scores, to pick a data-backed default instead of a guess
+  metrics_report.py      Shared confusion-matrix / precision / recall / F1 helper for the two above
+  loadtest.py            Fires concurrent requests and reports latency percentiles / throughput
 tests/
   test_main.py            Endpoint tests (Hugging Face calls are mocked, no network/API key needed)
-  test_sentiment_client.py Unit tests for the NEUTRAL-threshold parsing logic
+  test_sentiment_client.py Unit tests for label normalization, the NEUTRAL gate, and batch parsing
   test_circuit_breaker.py  Unit tests for the circuit breaker's state machine
   test_cache_backend.py    Unit tests for the cache backends
 .github/workflows/ci.yml  Runs the test suite on every push/PR
@@ -92,9 +105,9 @@ flowchart TD
     BR -- yes --> BO[503, fail fast]
     BR -- no --> H[Call Hugging Face<br/>Inference API async]
     H --> I{Response}
-    I -- 200 --> S{score below<br/>NEUTRAL threshold?}
+    I -- 200 --> S{Model's top label<br/>NEUTRAL, or its score<br/>below threshold?}
     S -- yes --> N1[Label: NEUTRAL]
-    S -- no --> N2[Label: POSITIVE/NEGATIVE]
+    S -- no --> N2[Label: POSITIVE/NEGATIVE<br/>from the model]
     N1 --> J[Store in cache, close breaker]
     N2 --> J
     J --> K[Return result<br/>cached: false]
@@ -235,12 +248,9 @@ With the API running in one terminal, in another terminal:
 python scripts/evaluate.py --csv data/sample_reviews.csv --url http://localhost:8000/sentiment
 ```
 
-This calls the live endpoint for every row in the CSV and prints an accuracy score, e.g.:
-
-```
-Evaluated 20 samples (0 request errors) in 4.31s (per-row mode).
-Accuracy: 19/20 = 95.0%
-```
+This calls the live endpoint for every row in the CSV and prints a confusion matrix plus
+per-class precision/recall/F1 and overall accuracy/macro-F1 — not just a single accuracy number
+(see [`scripts/metrics_report.py`](scripts/metrics_report.py)).
 
 Add `--batch` to send the whole CSV to `/sentiment/batch` in a single call instead, so the
 per-row and batch wall-clock times can be compared directly:
@@ -248,6 +258,39 @@ per-row and batch wall-clock times can be compared directly:
 ```bash
 python scripts/evaluate.py --csv data/sample_reviews.csv --url http://localhost:8000/sentiment --batch
 ```
+
+Real output from the current model/threshold defaults, batch mode, all 30 labeled rows:
+
+```
+Evaluated 30 samples in a single batch call, 1.38s (batch mode).
+expected \ predicted  POSITIVE   NEGATIVE   NEUTRAL
+POSITIVE              10         0          0
+NEGATIVE              0          9          1
+NEUTRAL                1         1          8
+
+label      precision    recall        f1   support
+POSITIVE       0.909     1.000     0.952        10
+NEGATIVE       0.900     0.900     0.900        10
+NEUTRAL        0.889     0.800     0.842        10
+
+accuracy: 90.0% (30 samples), macro-F1: 0.898
+```
+
+## Calibrating the NEUTRAL threshold
+
+`NEUTRAL_CONFIDENCE_THRESHOLD`'s default (`0.7`) isn't a guess — it was picked by sweeping
+candidate thresholds against the labeled dataset and measuring accuracy/macro-F1 for each (see
+[ADR-0015](docs/adr/0015-data-driven-neutral-threshold.md)). To re-run the calibration (e.g. after
+changing the model or expanding the dataset):
+
+```bash
+python scripts/calibrate_threshold.py --csv data/sample_reviews.csv
+```
+
+This calls Hugging Face directly once per row (not through the running API), then replays the
+NEUTRAL-gate decision locally for a range of thresholds, so trying more thresholds doesn't cost
+more API calls. It prints an accuracy/macro-F1 table across the swept thresholds and recommends
+the best one.
 
 ## Load testing
 
@@ -297,14 +340,19 @@ A few extra pieces built on top of the two required bonuses, each documented as 
 - **Async I/O + batch endpoint**: `httpx.AsyncClient` instead of blocking calls, plus
   `POST /sentiment/batch` for classifying many texts in one Hugging Face round trip
   ([ADR-0008](docs/adr/0008-async-http-client-and-batch-endpoint.md)).
-- **NEUTRAL label**: low-confidence calls are reported as `NEUTRAL` instead of a forced coin-flip
-  ([ADR-0009](docs/adr/0009-neutral-confidence-threshold.md)).
+- **NEUTRAL label**: the model classifies POSITIVE/NEUTRAL/NEGATIVE natively, and low-confidence
+  calls are downgraded to `NEUTRAL` too instead of a forced coin-flip
+  ([ADR-0014](docs/adr/0014-native-3-class-sentiment-model.md)).
 - **Circuit breaker**: fails fast during a real upstream outage instead of retrying a service
   that's already down ([ADR-0010](docs/adr/0010-circuit-breaker-for-upstream-resilience.md)).
 - **Metrics + structured logs**: see [Observability](#observability) above
   ([ADR-0011](docs/adr/0011-observability-metrics-and-structured-logging.md)).
 - **Pluggable cache backend**: in-memory by default, Redis opt-in
   ([ADR-0012](docs/adr/0012-pluggable-cache-backend.md)).
+- **Data-driven evaluation and threshold calibration**: `scripts/evaluate.py` reports a confusion
+  matrix and per-class precision/recall/F1 instead of a single accuracy number, and
+  `NEUTRAL_CONFIDENCE_THRESHOLD`'s default is picked by sweeping thresholds against labeled data
+  rather than guessed ([ADR-0015](docs/adr/0015-data-driven-neutral-threshold.md)).
 
 ## Configuration reference
 
@@ -313,7 +361,7 @@ All configuration is read from environment variables (see [`.env.example`](.env.
 | Variable                       | Default                                              | Description                          |
 |---------------------------------|-------------------------------------------------------|---------------------------------------|
 | `HF_API_TOKEN`                  | *(required)*                                          | Hugging Face API token                |
-| `HF_MODEL`                      | `distilbert/distilbert-base-uncased-finetuned-sst-2-english` | Model used for classification |
+| `HF_MODEL`                      | `cardiffnlp/twitter-roberta-base-sentiment-latest`     | Model used for classification (native POSITIVE/NEUTRAL/NEGATIVE) |
 | `REQUEST_TIMEOUT_SECONDS`       | `15`                                                   | Timeout per Hugging Face request      |
 | `MAX_RETRIES`                   | `3`                                                     | Retries while the model is loading    |
 | `CACHE_TTL_SECONDS`             | `3600`                                                 | Cache entry lifetime                  |
@@ -323,7 +371,7 @@ All configuration is read from environment variables (see [`.env.example`](.env.
 | `RATE_LIMIT`                    | `10/minute`                                             | Requests allowed per client IP on `/sentiment` |
 | `BATCH_RATE_LIMIT`              | `5/minute`                                              | Requests allowed per client IP on `/sentiment/batch` |
 | `BATCH_MAX_SIZE`                | `50`                                                    | Max texts accepted per batch request  |
-| `NEUTRAL_CONFIDENCE_THRESHOLD`  | `0.6`                                                   | Scores below this become `NEUTRAL`    |
+| `NEUTRAL_CONFIDENCE_THRESHOLD`  | `0.7` (calibrated, see [ADR-0015](docs/adr/0015-data-driven-neutral-threshold.md)) | Non-NEUTRAL calls below this score become `NEUTRAL` too |
 | `CIRCUIT_BREAKER_THRESHOLD`     | `5`                                                     | Consecutive failures before failing fast |
 | `CIRCUIT_BREAKER_RESET_SECONDS` | `30`                                                     | Cooldown before a trial call reopens the breaker |
 

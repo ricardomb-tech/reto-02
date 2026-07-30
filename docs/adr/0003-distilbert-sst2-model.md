@@ -1,6 +1,6 @@
 # ADR-0003: Use DistilBERT fine-tuned on SST-2 as the classification model
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0014](0014-native-3-class-sentiment-model.md)
 - **Date:** 2026-07-29
 - **Author:** Ricardo Martinez B
 

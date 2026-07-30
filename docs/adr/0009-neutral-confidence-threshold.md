@@ -1,6 +1,6 @@
 # ADR-0009: Confidence threshold for a NEUTRAL label
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0015](0015-data-driven-neutral-threshold.md)
 - **Date:** 2026-07-30
 - **Author:** Ricardo Martinez B
 

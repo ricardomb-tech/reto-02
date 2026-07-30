@@ -20,8 +20,23 @@ accepted risk rather than silently ignored.
 - **Security response headers** (`app/main.py`): every response now gets
   `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
   `Referrer-Policy: no-referrer`. `/demo` additionally gets a
-  `Content-Security-Policy` restricting scripts/styles to `'self'`, since
-  it's the only route serving actual HTML with an inline `<script>`.
+  `Content-Security-Policy` restricting scripts/styles to `'self'`.
+
+  **Update, found via a real-browser test (not just `curl`):** the CSP's
+  `script-src 'self'` silently blocked the demo page's own inline
+  `<script>` block — `'self'` only covers same-origin *external* scripts,
+  not inline ones, so every browser enforcing the policy ran zero
+  JavaScript on `/demo` and the "Analyze" button did nothing. Nothing
+  caught this earlier because prior verification only checked the JSON API
+  responses with `curl`, never loaded the page in an actual browser with
+  CSP enforcement on. Fixed by moving the script out to
+  [`static/app.js`](../../static/app.js), loaded via
+  `<script src="app.js">` — same-origin external scripts are allowed under
+  `script-src 'self'`, so the policy stays exactly as strict as intended
+  instead of adding `'unsafe-inline'` (which would have defeated most of
+  the point of setting a CSP here at all). Verified with a headless
+  Playwright browser against the live CSP-enforcing response: clicking
+  Analyze now fires the `/sentiment` request and renders the result.
 - **Request body size cap** (`app/main.py`, `app/config.py`): requests over
   `MAX_REQUEST_BODY_BYTES` (default 256 KB) are rejected with `413` before
   the body is read, so an oversized payload can't be fully buffered and
@@ -47,6 +62,35 @@ accepted risk rather than silently ignored.
   against `requirements.txt` so dependency vulnerabilities get caught
   automatically going forward instead of only during a manual audit.
 
+  **Update, 2026-07-30 — the `pip-audit` job did exactly what it was
+  added for:** it (via GitHub's Dependabot, reading the same
+  `requirements.txt`) opened 7 alerts against the pinned `starlette==0.37.2`
+  (DoS via multipart parsing, DoS via unbounded form limits, missing Host
+  header validation poisoning `request.url.path`, SSRF/NTLM credential
+  theft via UNC paths in `StaticFiles` on Windows — relevant here, this
+  project's own `/demo` route uses `StaticFiles` — arbitrary HTTP method
+  dispatch via `getattr` on `HTTPEndpoint`, and unvalidated path
+  concatenation poisoning `request.url.hostname`). Dependabot's own
+  auto-fix PR only bumped `starlette` to `1.3.1` in isolation, which is
+  unsatisfiable — `fastapi==0.111.0` hard-requires `starlette<0.38.0`, so
+  both the `pip-audit` job and the `pytest` job failed on that PR ("Cannot
+  install ... because these package versions have conflicting
+  dependencies"). Fixing it for real meant upgrading the whole chain, not
+  just the one flagged package: `fastapi` 0.111.0 → 0.141.1 (requires
+  `pydantic>=2.9.0`, so `pydantic` 2.7.4 → 2.13.4 came with it), `starlette`
+  0.37.2 → 1.3.1, and `prometheus-fastapi-instrumentator` 7.1.0 → 8.1.0
+  (7.x hard-caps `starlette<1.0.0`; this is the exact same package that
+  caused a real outage the last time its Starlette pin moved, see
+  ADR-0011, so it got the most scrutiny here). Verified before trusting it:
+  a clean venv install of the new `requirements.txt` from scratch (mirroring
+  what CI actually runs, not just patching the existing dev venv), the full
+  `pytest` suite green in that clean venv, `pip-audit -r requirements.txt`
+  reporting no known vulnerabilities, and a live smoke test of every route
+  (`/health`, `/sentiment`, `/sentiment/batch`, `/metrics`, `/demo/`,
+  `/demo/app.js`, `/docs`, the 400/413 error paths, and that the security
+  headers/CSP from this same ADR are still present on responses) against a
+  freshly started server on the new dependency set.
+
 ### Accepted risk, documented rather than "fixed"
 
 - **Rate limiting is keyed on the direct socket peer address**
@@ -61,19 +105,13 @@ accepted risk rather than silently ignored.
   trusted proxy's forwarded header is honored. The current bare
   `docker run -p 8000:8000` deployment described in the README is not
   affected, since there's no proxy in front of it.
-- **`starlette==0.37.2` is pinned below the version I'd otherwise default
-  to**, because `fastapi==0.111.0` hard-requires `starlette<0.38.0,>=0.37.2`
-  (confirmed via the installed package's own metadata) — this pin is what
-  broke the app once already when `prometheus-fastapi-instrumentator`
-  pulled in a newer Starlette (see ADR-0011). A Starlette advisory around
-  unbounded multipart/form-data parsing was raised during the audit, but
-  this service has no file-upload or form-data endpoints at all (confirmed
-  by grepping for `UploadFile`/`File(`/`Form(`/`multipart` across the
-  codebase, zero matches), so the vulnerable code path is never reached
-  here regardless of the pinned version. Upgrading both `fastapi` and
-  `starlette` together is possible but riskier than the actual exposure
-  warrants right now; `pip-audit` running in CI (see above) will flag it
-  automatically if that changes.
+- ~~`starlette==0.37.2` is pinned below the version I'd otherwise default to~~
+  — **resolved, see the 2026-07-30 update below.** This bullet originally
+  argued the pin was safe because the only known advisory at the time
+  (unbounded multipart parsing) didn't apply to a service with no
+  file-upload endpoints. That stopped being the full picture once GitHub
+  opened 7 Dependabot alerts against `starlette` (see below), so the
+  pin was actually upgraded rather than re-argued around.
 - **No API-key layer on `/sentiment`/`/sentiment/batch`**, only per-IP rate
   limiting (ADR-0007). This is intentional and matches the challenge's
   requirement for a public HTTP endpoint; it's called out here so it's a

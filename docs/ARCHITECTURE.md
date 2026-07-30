@@ -30,7 +30,7 @@ model.
 flowchart LR
     Client["API client<br/>(curl, demo page,<br/>evaluate.py, loadtest.py)"]
     API[["Sentiment Analysis API<br/>(this repo, FastAPI)"]]
-    HF["Hugging Face Inference API<br/>(hosted DistilBERT SST-2 model)"]
+    HF["Hugging Face Inference API<br/>(hosted RoBERTa 3-class sentiment model)"]
     Redis[("Redis<br/>(optional, CACHE_BACKEND=redis)")]
     Prom["Prometheus<br/>(optional scraper)"]
 
@@ -62,7 +62,9 @@ flowchart LR
 | [`app/config.py`](../app/config.py) | `Settings` — all configuration read once from environment variables at import time |
 | [`app/logging_config.py`](../app/logging_config.py) | Structured (JSON) logging setup used by the request-logging middleware |
 | [`static/index.html`](../static/index.html) | Zero-dependency demo page mounted at `/demo` |
-| [`scripts/evaluate.py`](../scripts/evaluate.py) | Offline accuracy check: calls the running API against a labeled CSV |
+| [`scripts/evaluate.py`](../scripts/evaluate.py) | Calls the running API against a labeled CSV; reports a confusion matrix and per-class precision/recall/F1 |
+| [`scripts/calibrate_threshold.py`](../scripts/calibrate_threshold.py) | Sweeps `NEUTRAL_CONFIDENCE_THRESHOLD` against labeled data using real model scores fetched once per row |
+| [`scripts/metrics_report.py`](../scripts/metrics_report.py) | Shared confusion-matrix / precision / recall / F1 helper used by both scripts above |
 | [`scripts/loadtest.py`](../scripts/loadtest.py) | Concurrent load generator reporting throughput and latency percentiles |
 
 There is no database and no persistent state beyond the cache (which is either
@@ -104,7 +106,7 @@ flowchart LR
         REDIS[(Redis<br/>CACHE_BACKEND=redis)]
     end
 
-    HF["Hugging Face Inference API<br/>DistilBERT SST-2"]
+    HF["Hugging Face Inference API<br/>cardiffnlp/twitter-roberta-base-sentiment-latest"]
 
     C -->|HTTPS/JSON| MW
     CACHE --> MEM
@@ -127,9 +129,9 @@ flowchart TD
     BR -- yes --> BO[503, fail fast]
     BR -- no --> H[Call Hugging Face<br/>Inference API async]
     H --> I{Response}
-    I -- 200 --> S{score below<br/>NEUTRAL threshold?}
+    I -- 200 --> S{Model's top label NEUTRAL,<br/>or score below threshold?}
     S -- yes --> N1[Label: NEUTRAL]
-    S -- no --> N2[Label: POSITIVE/NEGATIVE]
+    S -- no --> N2[Label: POSITIVE/NEGATIVE<br/>from the model]
     N1 --> J[Store in cache, close breaker]
     N2 --> J
     J --> K[Return result<br/>cached: false]
