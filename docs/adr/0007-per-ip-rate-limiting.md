@@ -6,58 +6,60 @@
 
 ## Context
 
-Bonus B also asks for rate limiting. Two related but distinct concerns exist:
+Bonus B also asks for rate limiting, and there are really two separate
+problems here:
 
 1. Protecting **this** service from being hammered by its own clients.
 2. Handling the Hugging Face Inference API's own rate limit (`429`) and
    "model is loading" (`503`) responses gracefully, since the free tier is
-   shared and can throttle or cold-start.
+   shared and can throttle or cold-start on you.
 
 ## Decision
 
-- Incoming requests to `/sentiment` are rate-limited **per client IP** using
-  `slowapi` (`app/main.py`), with a default of `10/minute`, configurable via
-  the `RATE_LIMIT` environment variable. Requests over the limit receive an
-  HTTP `429`.
-- Calls to the upstream Hugging Face API retry automatically on `503` (model
-  loading) with a short backoff, up to `MAX_RETRIES` attempts
-  ([`app/sentiment_client.py`](../../app/sentiment_client.py)), and propagate a
-  `429` transparently if Hugging Face itself is rate-limiting the request.
+- Requests to `/sentiment` are rate-limited **per client IP** using
+  `slowapi` (`app/main.py`), 10/minute by default, configurable through the
+  `RATE_LIMIT` environment variable. Go over the limit and you get an HTTP
+  `429`.
+- Calls to the upstream Hugging Face API retry automatically on `503`
+  (model loading) with a short backoff, up to `MAX_RETRIES` attempts
+  ([`app/sentiment_client.py`](../../app/sentiment_client.py)), and pass a
+  `429` straight through if Hugging Face itself is rate-limiting the
+  request.
 
 ## Rationale
 
-- Per-IP limiting is simple to reason about and requires no additional
-  infrastructure (no external rate-limit store needed for a single-instance
-  deployment), matching the scope of the challenge.
-- Backing off on `503` avoids surfacing a spurious failure to the caller for a
-  transient, well-documented Hugging Face behavior (cold model instances), and
+- Per-IP limiting is easy to reason about and needs no extra infrastructure
+  (no external rate-limit store for a single-instance deployment), which
+  matches the scope of the challenge.
+- Backing off on `503` avoids surfacing a spurious failure for what's really
+  a well-known, transient Hugging Face behavior (cold model instances), and
   keeps `scripts/evaluate.py` runnable without manual retries.
 - Making the service's own rate limit explicit protects the shared Hugging
-  Face free-tier quota that all requests ultimately funnel through.
+  Face free-tier quota that every request ultimately funnels through.
 
 ## Consequences
 
 ### Pros
 
-- Both failure modes (this service overloaded vs. the upstream model
-  overloaded/cold) are handled distinctly and documented in the README's error
-  table.
+- Both failure modes, this service overloaded versus the upstream model
+  overloaded or cold, are handled separately and documented in the README's
+  error table.
 - `scripts/evaluate.py` paces its own requests based on the configured
-  `RATE_LIMIT`, so evaluating the sample dataset doesn't trip the limiter.
+  `RATE_LIMIT`, so running it against the sample dataset doesn't trip the
+  limiter.
 
 ### Cons
 
-- Per-IP limiting only works correctly with a fixed, addressable IP or one
-  correctly forwarded via a reverse proxy; behind certain load balancers,
-  extra "trusted proxy" configuration could be needed. Not relevant to the
+- Per-IP limiting only works cleanly with a fixed, addressable IP, or one
+  correctly forwarded through a reverse proxy. Behind certain load
+  balancers, you'd need extra "trusted proxy" config. Not a concern for the
   current single-instance deployment.
-- A hardcoded retry cap (`MAX_RETRIES`) means a Hugging Face model that stays
-  cold for longer than a few retries will still surface a `503` to the
-  caller.
+- The retry cap (`MAX_RETRIES`) is hardcoded, so a model that stays cold
+  longer than a few retries will still surface a `503` to the caller.
 
 ## Alternatives considered
 
 | Alternative | Reason not adopted |
 |-------------|---------------------|
-| **Global (non-per-IP) rate limit** | Would let one noisy client starve all others; per-IP limiting is a small addition via `slowapi` and is more fair. |
-| **No retry on upstream `503`** | Would make the API unreliable for a normal user, since Hugging Face's free tier commonly cold-starts models that haven't been called recently. |
+| **Global (non-per-IP) rate limit** | Would let one noisy client starve everyone else. Per-IP limiting is a small addition through `slowapi` and is just more fair. |
+| **No retry on upstream `503`** | Would make the API flaky for a normal user, since Hugging Face's free tier commonly cold-starts models that haven't been called in a while. |

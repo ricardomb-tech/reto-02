@@ -6,50 +6,50 @@
 
 ## Context
 
-Once the Hugging Face Inference API was chosen ([ADR-0002](0002-huggingface-inference-api.md)),
-a specific model was needed. It had to output a binary sentiment label
-compatible with commonly available labeled review datasets, and be reliably
-hosted on the Inference API without long cold-start times.
+With the Hugging Face Inference API already chosen
+([ADR-0002](0002-huggingface-inference-api.md)), I still needed a specific
+model. It had to output a binary sentiment label that matched common labeled
+review datasets, and stay reliably hosted on the Inference API without long
+cold starts.
 
 ## Decision
 
-The model
-[`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english)
-was selected, configurable via the `HF_MODEL` environment variable
-(see [`app/config.py`](../../app/config.py)).
+I picked
+[`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english),
+configurable through the `HF_MODEL` environment variable (see
+[`app/config.py`](../../app/config.py)).
 
 ## Rationale
 
-- It is one of the most widely used, well-documented sentiment models on the
-  Hugging Face Hub, fine-tuned on SST-2 (Stanford Sentiment Treebank).
+- It's one of the most widely used, well-documented sentiment models on the
+  Hub, fine-tuned on SST-2 (Stanford Sentiment Treebank).
 - It returns exactly two labels, `POSITIVE`/`NEGATIVE`, with a confidence
-  score — matching the binary `label` column used in the IMDB dataset chosen
-  for evaluation ([ADR-0005](0005-sample-dataset-instead-of-full-csv.md)).
-- Being a distilled model, it is smaller and faster to serve than full BERT,
-  reducing the chance of long "model loading" (`503`) responses from the
+  score, which lines up with the binary `label` column in the IMDB dataset I
+  use for evaluation ([ADR-0005](0005-sample-dataset-instead-of-full-csv.md)).
+- Being distilled, it's smaller and faster to serve than full BERT, which
+  cuts the odds of a long "model loading" (`503`) response from the
   Inference API.
 
 ## Consequences
 
 ### Pros
 
-- No additional post-processing is needed to map model output to the
-  API's `label`/`score` response fields.
-- Swappable: any other Hugging Face text-classification model can be used by
-  changing `HF_MODEL`, as long as it returns the same
-  `[[{"label", "score"}, ...]]` response shape.
+- No extra post-processing to map model output onto the API's `label`/`score`
+  fields.
+- Swappable: any other Hugging Face text-classification model works if I
+  change `HF_MODEL`, as long as it returns the same
+  `[[{"label", "score"}, ...]]` shape.
 
 ### Cons
 
-- Binary POSITIVE/NEGATIVE output cannot express neutral sentiment; texts that
-  are genuinely neutral will still be forced into one of the two classes.
-- Trained primarily on movie-review-style English text; accuracy may be lower
-  on domains very different from its training data (e.g. highly technical or
-  non-English text).
+- Binary POSITIVE/NEGATIVE can't express neutral sentiment. Genuinely
+  neutral text still gets forced into one of the two buckets.
+- It's trained mostly on movie-review-style English, so accuracy can drop on
+  very different domains, technical text or non-English input, for example.
 
 ## Alternatives considered
 
 | Alternative | Reason not adopted |
 |-------------|---------------------|
-| **`cardiffnlp/twitter-roberta-base-sentiment`** (3-class: negative/neutral/positive) | Would have required a 3-label evaluation dataset and slightly more complex response parsing; the 2-class model matches the chosen dataset directly. |
-| **Full `bert-base-uncased` fine-tuned variants** | Larger model, no measurable accuracy benefit for this use case, and higher risk of slow/",loading" responses on the free Inference API tier. |
+| **`cardiffnlp/twitter-roberta-base-sentiment`** (3-class: negative/neutral/positive) | Would need a 3-label evaluation dataset and slightly more parsing; the 2-class model matches the dataset I already have. |
+| **Full `bert-base-uncased` fine-tuned variants** | Bigger model, no real accuracy gain for this use case, and more likely to sit "loading" on the free Inference API tier. |
